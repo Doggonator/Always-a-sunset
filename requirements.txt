@@ -1,0 +1,7 @@
+streamlit
+requests
+bs4
+selenium
+webdriver_manager
+csv
+pycountry
