@@ -195,6 +195,7 @@ def load_sun_time(sun):#sun 1 = sunrise, 2 = sunset
                     time(20, 30), time(21, 00), time(20, 45), time(20, 00),
                     time(19, 00), time(18, 00), time(16, 30), time(16, 00)]
     now = datetime.now(timezone.utc)#current utc time
+    st.caption("Utc now: "+str(now))
     month_index = now.month-1#gets current month index, I.E. jan = 0
     sun_time = times[month_index]
     time_zone_longitude=15#how much longitude 1 timezone takes up
