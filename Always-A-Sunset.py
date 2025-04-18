@@ -14,10 +14,55 @@ import csv
 import pycountry 
 
 dev = False#Selenium setting. Dev needed to run locally, no dev if we want to run in streamlit cloud.
+
 st.set_page_config(page_title = "Always a sunset")
 st.title("Find a sunrise or sunset around the world")
 st.caption("Created by Drew Warner with cameras by EarthCam")
-st.caption("Version 1.0")
+st.caption("Version 1.1")
+
+def launch_browser():
+    #initialize selenium to get our responses here. This is necessary because the base html returned by requests uses weird obj.-- objects, but this returns proper links and ids.
+    options = Options()
+
+
+    options.add_argument('--headless=new')
+
+
+    #reduce mem usage, with some options
+    options.add_argument("--no-sandbox")
+    options.add_argument("--disable-dev-shm-usage")
+    options.add_argument("--disable-gpu")
+    options.add_argument("--disable-software-rasterizer")
+    options.add_argument("--disable-extensions")
+    options.add_argument("--disable-background-networking")
+    options.add_argument("--remote-debugging-port=9222")
+    options.add_argument("--disable-logging")
+    options.add_argument("--log-level=3")
+    #reduce detectability as bot with some more options
+    options.add_argument("--disable-blink-features=AutomationControlled")#make it not openly admit to being a bot
+    custom_ua = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) "#make us not look exactly like a bot, where this would say HeadlessChrome
+        "AppleWebKit/537.36 (KHTML, like Gecko) "
+        "Chrome/90.0.4430.212 Safari/537.36")
+    options.add_argument(f"user-agent={custom_ua}")
+    options.add_experimental_option("excludeSwitches", ["enable-automation"])
+    if not dev:
+        browser = webdriver.Chrome(service=Service(ChromeDriverManager(chrome_type=ChromeType.CHROMIUM).install()), options=options)
+    else:
+        browser = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=options)
+    browser.set_window_size(500, 500)
+    #a bit more anti-anti-bot
+    browser.execute_cdp_cmd(
+        "Page.addScriptToEvaluateOnNewDocument",
+        {"source": """
+        //remove the webdriver property
+        Object.defineProperty(navigator, 'webdriver', {get: () => undefined});
+        //fake the languages property
+        Object.defineProperty(navigator, 'languages', {get: () => ['en-US', 'en']});
+        //fake the plugins property (just need a non-zero length)
+        Object.defineProperty(navigator, 'plugins', {get: () => [1, 2, 3, 4, 5]});
+        """})
+    return browser
+
 if "cam_details" not in st.session_state:#we only want to do this once, as it is time consuming
     with st.spinner("Finding available camera locations..."):
         with st.spinner("Finding countries and states..."):
@@ -38,46 +83,7 @@ if "cam_details" not in st.session_state:#we only want to do this once, as it is
                         full_links.append("https://earthcam.com/network/?"+"".join(link[link.find("page="):])+"&"+"".join(link[link.find("country="):link.find("&page=")]))
         with st.spinner("Finding each camera..."):
             with st.spinner("Loading finder..."):
-                #initialize selenium to get our responses here. This is necessary because the base html returned by requests uses weird obj.-- objects, but this returns proper links and ids.
-                options = Options()
-
-
-                options.add_argument('--headless=new')
-
-
-                #reduce mem usage, with some options
-                options.add_argument("--no-sandbox")
-                options.add_argument("--disable-dev-shm-usage")
-                options.add_argument("--disable-gpu")
-                options.add_argument("--disable-software-rasterizer")
-                options.add_argument("--disable-extensions")
-                options.add_argument("--disable-background-networking")
-                options.add_argument("--remote-debugging-port=9222")
-                options.add_argument("--disable-logging")
-                options.add_argument("--log-level=3")
-                #reduce detectability as bot with some more options
-                options.add_argument("--disable-blink-features=AutomationControlled")#make it not openly admit to being a bot
-                custom_ua = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) "#make us not look exactly like a bot, where this would say HeadlessChrome
-                    "AppleWebKit/537.36 (KHTML, like Gecko) "
-                    "Chrome/90.0.4430.212 Safari/537.36")
-                options.add_argument(f"user-agent={custom_ua}")
-                options.add_experimental_option("excludeSwitches", ["enable-automation"])
-                if not dev:
-                    browser = webdriver.Chrome(service=Service(ChromeDriverManager(chrome_type=ChromeType.CHROMIUM).install()), options=options)
-                else:
-                    browser = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=options)
-                browser.set_window_size(500, 500)
-                #a bit more anti-anti-bot
-                browser.execute_cdp_cmd(
-                    "Page.addScriptToEvaluateOnNewDocument",
-                    {"source": """
-                    //remove the webdriver property
-                    Object.defineProperty(navigator, 'webdriver', {get: () => undefined});
-                    //fake the languages property
-                    Object.defineProperty(navigator, 'languages', {get: () => ['en-US', 'en']});
-                    //fake the plugins property (just need a non-zero length)
-                    Object.defineProperty(navigator, 'plugins', {get: () => [1, 2, 3, 4, 5]});
-                    """})
+                browser = launch_browser()
         #now, for each of these links, find each available camera location.
         every_location_name = []
         every_location_link = []
@@ -85,7 +91,13 @@ if "cam_details" not in st.session_state:#we only want to do this once, as it is
         failed = False#if the selenium timed out, don't cause a failure down the line
         for i in range(len(full_links)):
             prog_bar.progress(i/len(full_links), text="Locations searched: "+str(i)+"/"+str(len(full_links)))
-            browser.get(full_links[i])#get the page
+            try:
+                browser.get(full_links[i])#get the page
+            except:#selenium crashed, relaunch and try again.
+                browser.quit()
+                browser = launch_browser()
+                i -= 1
+                continue
             #wait for page load
             try:
                 WebDriverWait(browser, 30).until(
