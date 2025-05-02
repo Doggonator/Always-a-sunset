@@ -1,5 +1,5 @@
 import streamlit as st
-from datetime import time, timezone, date, datetime
+from datetime import time, timezone, date, datetime, timedelta
 import requests
 from bs4 import BeautifulSoup
 from selenium import webdriver
@@ -18,8 +18,8 @@ dev = False#Selenium setting. Dev needed to run locally, no dev if we want to ru
 st.set_page_config(page_title = "Always a sunset")
 st.title("Find a sunrise or sunset around the world")
 st.caption("Created by Drew Warner with cameras by EarthCam")
-st.caption("Version 1.1")
-
+st.caption("Version 1.2")
+st.caption("This program is still being refined and calibrated heavily. It may not accurately find a sunrise or sunset.")
 def launch_browser():
     #initialize selenium to get our responses here. This is necessary because the base html returned by requests uses weird obj.-- objects, but this returns proper links and ids.
     options = Options()
@@ -45,6 +45,15 @@ def launch_browser():
         "Chrome/90.0.4430.212 Safari/537.36")
     options.add_argument(f"user-agent={custom_ua}")
     options.add_experimental_option("excludeSwitches", ["enable-automation"])
+    #disable image loading (along with other things), making page load faster
+    options.add_experimental_option("prefs", {"profile.managed_default_content_settings.images": 2,
+    "profile.managed_default_content_settings.stylesheets": 2,
+    "profile.managed_default_content_settings.fonts": 2,
+    "profile.managed_default_content_settings.media_stream": 2,      # mic/camera
+    "profile.managed_default_content_settings.notifications": 2,})
+    #add eager loading, skips full asset loading, making this whole process faster
+    options.page_load_strategy = 'eager'
+    
     if not dev:
         browser = webdriver.Chrome(service=Service(ChromeDriverManager(chrome_type=ChromeType.CHROMIUM).install()), options=options)
     else:
@@ -61,6 +70,12 @@ def launch_browser():
         //fake the plugins property (just need a non-zero length)
         Object.defineProperty(navigator, 'plugins', {get: () => [1, 2, 3, 4, 5]});
         """})
+    #make the browser avoid some network requests for things like images that we do not need
+    browser.execute_cdp_cmd("Network.enable", {})
+    #block common static filetypes
+    browser.execute_cdp_cmd("Network.setBlockedURLs", {
+        "urls": ["*.png","*.jpg","*.jpeg","*.gif","*.css","*.woff2","*.woff","*.ttf"]
+    })
     return browser
 
 if "cam_details" not in st.session_state:#we only want to do this once, as it is time consuming
@@ -198,16 +213,22 @@ def find_longdist(long1, long2):#this makes sure we calculate for timezones that
     return min([dist1, dist2, dist3])
 
 def load_sun_time(sun):#sun 1 = sunrise, 2 = sunset
+    sun_visualize_time = 30#how long towards day from the actual sunset we go (makes the sunset/rise more visible) [minutes]
     if sun == 1:
-        times = [time(8, 00), time(7, 15), time(6, 15), time(5, 30),
+        ts = [time(8, 00), time(7, 15), time(6, 15), time(5, 30),
             time(4, 45), time(4, 30), time(4, 45), time(5, 30), time(6, 15),
-            time(7, 00), time(7, 45), time(8, 00)]
+            time(7, 00), time(7, 45), time(8, 00)]#actual times for sunrise
+        times = []
+        for t in ts:#offset to make sun more visible
+            times.append((datetime.combine(datetime.today(), t) + timedelta(minutes=sun_visualize_time)).time())
     else:
-        times = [time(16, 00), time(17, 00), time(18, 00), time(19, 30),
+        ts = [time(16, 00), time(17, 00), time(18, 00), time(19, 30),
                     time(20, 30), time(21, 00), time(20, 45), time(20, 00),
-                    time(19, 00), time(18, 00), time(16, 30), time(16, 00)]
+                    time(19, 00), time(18, 00), time(16, 30), time(16, 00)]#actual times for sunset
+        times = []
+        for t in ts:#offset to make sun more visible
+            times.append((datetime.combine(datetime.today(), t) - timedelta(minutes=sun_visualize_time)).time())
     now = datetime.now(timezone.utc)#current utc time
-    st.caption("Utc now: "+str(now))
     month_index = now.month-1#gets current month index, I.E. jan = 0
     sun_time = times[month_index]
     time_zone_longitude=15#how much longitude 1 timezone takes up
